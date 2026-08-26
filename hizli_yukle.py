@@ -20,14 +20,11 @@ def bilgisayarda_kopya_olustur(orijinal, kopya):
 def manuel_yukle():
     print("⚡ Hazır veriler GitHub ve Vercel'e aktarılıyor...")
     
-    # 1. Bilgisayardaki kopyaları yenile
     bilgisayarda_kopya_olustur(ORIJINAL_BUGUN, KOPYA_BUGUN)
     bilgisayarda_kopya_olustur(ORIJINAL_GENEL, KOPYA_GENEL)
 
-    # 2. Git işlemlerini çalıştır
     try:
         print("📦 Sadece Excel ve kod dosyaları takibe alınıyor...")
-        # venv klasörünü es geçip sadece xlsx ve py dosyalarını ekliyoruz
         subprocess.run(["git", "add", "*.xlsx", "*.py"], check=True)
         
         tarih = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -35,10 +32,11 @@ def manuel_yukle():
         
         subprocess.run(["git", "commit", "--allow-empty", "-m", commit_mesaji], check=True)
         
-        # Hem master hem main dallarına push et
         print("⬆️ GitHub'a gönderiliyor...")
+        # master dalına gönder
         subprocess.run(["git", "push", "origin", "master"], check=True)
-        subprocess.run(["git", "push", "origin", "master:main"], check=True)
+        # main dalına zorla (force) eşitle ki reddedilmesin
+        subprocess.run(["git", "push", "origin", "master:main", "-f"], check=True)
         
         print(f"\n🎉 İŞLEM TAMAM! Veriler başarıyla gönderildi ({tarih}).")
         print("👉 Siteniz 30-60 saniye içinde güncellenecektir: https://oran-analiz-site.vercel.app")

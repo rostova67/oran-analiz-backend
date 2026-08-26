@@ -1,5 +1,4 @@
-fastapi
-uvicorn
-pandas
-numpy
-openpyxl
+fastapi 
+uvicorn 
+pandas 
+openpyxl 

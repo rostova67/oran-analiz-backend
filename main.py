@@ -45,7 +45,7 @@ def find_similar_matches(history_df, ms1, msx, ms2, ust, alt, min_matches=5):
     if history_df.empty:
         return pd.DataFrame(), 0.0
 
-    tolerances = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
+    tolerances = [0.05, 0.10, 0.15, 0.20]
     
     for tol in tolerances:
         cond = (
@@ -67,7 +67,7 @@ def find_similar_matches(history_df, ms1, msx, ms2, ust, alt, min_matches=5):
             filtered["SIM"] = (1 / (1 + diff)).round(3)
             return filtered, tol
             
-    return pd.DataFrame(), 0.30
+    return pd.DataFrame(), 0.20
 
 def get_match_analysis_payload(row, history_df):
     similar_df, tolerance = find_similar_matches(

@@ -4,7 +4,7 @@ import pandas as pd
 from collections import Counter
 from typing import Optional, Any
 
-app = FastAPI(title="Oran Analiz API", version="4.0")
+app = FastAPI(title="Oran Analiz API", version="4.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -196,8 +196,16 @@ def get_match_analysis_payload(row, history_df):
         if a >= 1:
             dep_05 += 1
 
+        # Benzer maçlara da SAAT bilgisi ekleniyor
+        raw_sim_saat = str(s_row.get("SAAT", "")).strip() if pd.notna(s_row.get("SAAT")) else ""
+        if len(raw_sim_saat) >= 5 and ":" in raw_sim_saat:
+            sim_saat_val = raw_sim_saat[:5]
+        else:
+            sim_saat_val = raw_sim_saat
+
         similar_list.append({
             "MAC": s_row.get("MAC", "-"),
+            "SAAT": sim_saat_val,
             "SKOR": str(s_row.get("SKOR", "-")),
             "MS1": s_row.get("MS1", 0),
             "MSX": s_row.get("MSX", 0),
@@ -229,8 +237,16 @@ def get_match_analysis_payload(row, history_df):
         top_score_pct = 0.0
         top_score_str = "-"
 
+    # Ana maç için SAAT formatlama (HH:MM biçimini garantiye alır)
+    raw_saat = str(row.get("SAAT", "")).strip() if pd.notna(row.get("SAAT")) else ""
+    if len(raw_saat) >= 5 and ":" in raw_saat:
+        saat_val = raw_saat[:5]
+    else:
+        saat_val = raw_saat
+
     return {
         "MAC": row.get("MAC", "Bilinmeyen Maç"),
+        "SAAT": saat_val,
 
         "MS1_ORAN": row.get("MS1", 0),
         "MSX_ORAN": row.get("MSX", 0),

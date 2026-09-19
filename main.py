@@ -4,7 +4,7 @@ import pandas as pd
 from collections import Counter
 from typing import Optional, Any
 
-app = FastAPI(title="Oran Analiz API", version="4.3")
+app = FastAPI(title="Oran Analiz API", version="4.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -151,7 +151,7 @@ def find_similar_matches(
         return pd.DataFrame(), SIMILARITY_TOLERANCE
 
 
-def get_match_analysis_payload(row, history_df):
+def get_match_analysis_payload(row, history_df, min_matches=MIN_SIMILAR_MATCHES):
 
     similar_df, tolerance = find_similar_matches(
         history_df,
@@ -160,10 +160,10 @@ def get_match_analysis_payload(row, history_df):
         row["MS2"],
         row["UST_2_5"],
         row["ALT_2_5"],
-        min_matches=MIN_SIMILAR_MATCHES
+        min_matches=min_matches
     )
 
-    if len(similar_df) < MIN_SIMILAR_MATCHES:
+    if len(similar_df) < min_matches:
         return None
 
     home = 0
@@ -224,7 +224,7 @@ def get_match_analysis_payload(row, history_df):
 
     valid = len(valid_scores)
 
-    if valid < MIN_SIMILAR_MATCHES:
+    if valid < min_matches:
         return None
 
     score_counts = dict(Counter(valid_scores))
@@ -245,7 +245,7 @@ def get_match_analysis_payload(row, history_df):
     saat_val = format_saat(row.get("SAAT"))
     raw_mac = str(row.get("MAC", "Bilinmeyen Maç")).strip()
 
-    # Maç isminin önünde [HH:MM] formatında saat ekliyoruz (Web sitesi listeleri için)
+    # Maç isminin önünde [HH:MM] formatında saat ekliyoruz
     display_mac = f"[{saat_val}] {raw_mac}" if saat_val else raw_mac
 
     return {
@@ -394,10 +394,14 @@ def get_mac_detay(
             detail="Maç bulunamadı"
         )
 
+    # Yeni Maçlar / Maç Detay seçildiğinde en az 1 benzer maç yeterlidir.
+    required_min_matches = 1
+
     try:
         payload = get_match_analysis_payload(
             row.iloc[0],
-            history_df
+            history_df,
+            min_matches=required_min_matches
         )
     except Exception:
         payload = None
@@ -406,7 +410,7 @@ def get_mac_detay(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"En az {MIN_SIMILAR_MATCHES} "
+                f"En az {required_min_matches} "
                 f"benzer maç gerekli. "
                 f"Tolerans: ±{SIMILARITY_TOLERANCE:.2f}"
             )
@@ -449,9 +453,11 @@ def get_bugunun_enleri():
             ):
                 continue
 
+            # Bugünün Enleri için varsayılan MIN_SIMILAR_MATCHES (7) uygulanır
             result = get_match_analysis_payload(
                 row,
-                history_df
+                history_df,
+                min_matches=MIN_SIMILAR_MATCHES
             )
 
             if result:

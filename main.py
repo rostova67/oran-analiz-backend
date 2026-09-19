@@ -4,7 +4,7 @@ import pandas as pd
 from collections import Counter
 from typing import Optional, Any
 
-app = FastAPI(title="Oran Analiz API", version="4.2")
+app = FastAPI(title="Oran Analiz API", version="4.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,6 +64,16 @@ def parse_score(score_str: Any) -> Optional[tuple]:
 
     except Exception:
         return None
+
+
+def format_saat(saat_val: Any) -> str:
+    """Saat değerini HH:MM formatına getirir."""
+    if pd.isna(saat_val):
+        return ""
+    st = str(saat_val).strip()
+    if len(st) >= 5 and ":" in st:
+        return st[:5]
+    return st
 
 
 def find_similar_matches(
@@ -196,12 +206,7 @@ def get_match_analysis_payload(row, history_df):
         if a >= 1:
             dep_05 += 1
 
-        # Benzer maçlara da SAAT bilgisi ekleniyor
-        raw_sim_saat = str(s_row.get("SAAT", "")).strip() if pd.notna(s_row.get("SAAT")) else ""
-        if len(raw_sim_saat) >= 5 and ":" in raw_sim_saat:
-            sim_saat_val = raw_sim_saat[:5]
-        else:
-            sim_saat_val = raw_sim_saat
+        sim_saat_val = format_saat(s_row.get("SAAT"))
 
         similar_list.append({
             "MAC": s_row.get("MAC", "-"),
@@ -237,15 +242,15 @@ def get_match_analysis_payload(row, history_df):
         top_score_pct = 0.0
         top_score_str = "-"
 
-    # Ana maç için SAAT formatlama (HH:MM biçimini garantiye alır)
-    raw_saat = str(row.get("SAAT", "")).strip() if pd.notna(row.get("SAAT")) else ""
-    if len(raw_saat) >= 5 and ":" in raw_saat:
-        saat_val = raw_saat[:5]
-    else:
-        saat_val = raw_saat
+    saat_val = format_saat(row.get("SAAT"))
+    raw_mac = str(row.get("MAC", "Bilinmeyen Maç")).strip()
+
+    # Maç isminin önünde [HH:MM] formatında saat ekliyoruz (Web sitesi listeleri için)
+    display_mac = f"[{saat_val}] {raw_mac}" if saat_val else raw_mac
 
     return {
-        "MAC": row.get("MAC", "Bilinmeyen Maç"),
+        "MAC": display_mac,
+        "RAW_MAC": raw_mac,
         "SAAT": saat_val,
 
         "MS1_ORAN": row.get("MS1", 0),
@@ -317,18 +322,19 @@ def get_tum_maclar_list():
 
     history_df, _ = load_data()
 
-    if history_df.empty:
+    if history_df.empty or "MAC" not in history_df.columns:
         return {"matches": []}
 
-    if "MAC" not in history_df.columns:
-        return {"matches": []}
+    matches = []
+    for _, row in history_df.iterrows():
+        mac = str(row.get("MAC", "")).strip()
+        if not mac:
+            continue
+        saat = format_saat(row.get("SAAT"))
+        display_name = f"[{saat}] {mac}" if saat else mac
+        matches.append(display_name)
 
-    return {
-        "matches": history_df["MAC"]
-        .dropna()
-        .astype(str)
-        .tolist()
-    }
+    return {"matches": matches}
 
 
 @app.get("/api/yeni-maclar-list")
@@ -336,18 +342,19 @@ def get_yeni_maclar_list():
 
     _, today_df = load_data()
 
-    if today_df.empty:
+    if today_df.empty or "MAC" not in today_df.columns:
         return {"matches": []}
 
-    if "MAC" not in today_df.columns:
-        return {"matches": []}
+    matches = []
+    for _, row in today_df.iterrows():
+        mac = str(row.get("MAC", "")).strip()
+        if not mac:
+            continue
+        saat = format_saat(row.get("SAAT"))
+        display_name = f"[{saat}] {mac}" if saat else mac
+        matches.append(display_name)
 
-    return {
-        "matches": today_df["MAC"]
-        .dropna()
-        .astype(str)
-        .tolist()
-    }
+    return {"matches": matches}
 
 
 @app.get("/api/mac-detay")
@@ -364,19 +371,22 @@ def get_mac_detay(
         else today_df
     )
 
-    if df.empty:
+    if df.empty or "MAC" not in df.columns:
         raise HTTPException(
             status_code=404,
             detail="Veri bulunamadı"
         )
 
-    if "MAC" not in df.columns:
-        raise HTTPException(
-            status_code=404,
-            detail="MAC sütunu bulunamadı"
-        )
+    # Gelen mac string'inden varsa baştaki [HH:MM] ifadesini temizleyerek aratıyoruz
+    search_mac = mac.strip()
+    if search_mac.startswith("[") and "]" in search_mac:
+        search_mac = search_mac.split("]", 1)[1].strip()
 
-    row = df[df["MAC"].astype(str) == str(mac)]
+    row = df[df["MAC"].astype(str).str.strip() == search_mac]
+
+    if row.empty:
+        # Alternatif olarak birebir eşleşmeyi dene
+        row = df[df["MAC"].astype(str) == str(mac)]
 
     if row.empty:
         raise HTTPException(

@@ -4,8 +4,9 @@ import pandas as pd
 from collections import Counter
 from typing import Optional, Any
 from sqlalchemy import create_engine
+import time
 
-app = FastAPI(title="Oran Analiz API", version="4.4")
+app = FastAPI(title="Oran Analiz API", version="4.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,8 +34,24 @@ MIN_SIMILAR_MATCHES = 7
 SIMILARITY_TOLERANCE = 0.05
 MIN_TEAM_MATCHES = 7
 
+# ============================================================
+# ÖNBELLEK (CACHE) MEKANİZMASI
+# ============================================================
+CACHE_DATA = {
+    "history_df": pd.DataFrame(),
+    "today_df": pd.DataFrame(),
+    "last_updated": 0
+}
+CACHE_TTL = 300  # 5 dakika (Saniye cinsinden)
 
-def load_data():
+
+def load_data(force_refresh: bool = False):
+    now = time.time()
+    
+    # Bellekte veri varsa ve süresi dolmadıysa doğrudan bellekten oku
+    if not force_refresh and not CACHE_DATA["history_df"].empty and (now - CACHE_DATA["last_updated"] < CACHE_TTL):
+        return CACHE_DATA["history_df"], CACHE_DATA["today_df"]
+
     try:
         history_df = pd.read_sql("SELECT * FROM oranlar", engine)
     except Exception:
@@ -51,7 +68,19 @@ def load_data():
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # Önbelleği güncelle
+    CACHE_DATA["history_df"] = history_df
+    CACHE_DATA["today_df"] = today_df
+    CACHE_DATA["last_updated"] = now
+
     return history_df, today_df
+
+
+@app.get("/api/cache-clear")
+def clear_cache():
+    """Yeni veri yüklendiğinde önbelleği anında temizleyip yeniler."""
+    load_data(force_refresh=True)
+    return {"status": "ok", "message": "Önbellek başarıyla güncellendi."}
 
 
 def parse_score(score_str: Any) -> Optional[tuple]:
@@ -252,7 +281,6 @@ def get_match_analysis_payload(row, history_df, min_matches=MIN_SIMILAR_MATCHES)
     saat_val = format_saat(row.get("SAAT"))
     raw_mac = str(row.get("MAC", "Bilinmeyen Maç")).strip()
 
-    # Maç isminin önünde [HH:MM] formatında saat ekliyoruz
     display_mac = f"[{saat_val}] {raw_mac}" if saat_val else raw_mac
 
     return {
@@ -384,7 +412,6 @@ def get_mac_detay(
             detail="Veri bulunamadı"
         )
 
-    # Gelen mac string'inden varsa baştaki [HH:MM] ifadesini temizleyerek aratıyoruz
     search_mac = mac.strip()
     if search_mac.startswith("[") and "]" in search_mac:
         search_mac = search_mac.split("]", 1)[1].strip()
@@ -392,7 +419,6 @@ def get_mac_detay(
     row = df[df["MAC"].astype(str).str.strip() == search_mac]
 
     if row.empty:
-        # Alternatif olarak birebir eşleşmeyi dene
         row = df[df["MAC"].astype(str) == str(mac)]
 
     if row.empty:
@@ -401,7 +427,6 @@ def get_mac_detay(
             detail="Maç bulunamadı"
         )
 
-    # Yeni Maçlar / Maç Detay seçildiğinde en az 1 benzer maç yeterlidir.
     required_min_matches = 1
 
     try:
@@ -460,7 +485,6 @@ def get_bugunun_enleri():
             ):
                 continue
 
-            # Bugünün Enleri için varsayılan MIN_SIMILAR_MATCHES (7) uygulanır
             result = get_match_analysis_payload(
                 row,
                 history_df,

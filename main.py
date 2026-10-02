@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 from collections import Counter
 from typing import Optional, Any
+from sqlalchemy import create_engine
 
 app = FastAPI(title="Oran Analiz API", version="4.4")
 
@@ -13,6 +14,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ============================================================
+# VERİTABANI BAĞLANTISI (SUPABASE)
+# ============================================================
+DB_URL = "postgresql://postgres:KatarinaRostova67@db.xqhdhwdgitksemfidsdi.supabase.co:5432/postgres"
+engine = create_engine(DB_URL)
 
 ODDS_COLUMNS = [
     "MS1",
@@ -29,12 +36,12 @@ MIN_TEAM_MATCHES = 7
 
 def load_data():
     try:
-        history_df = pd.read_excel("oranlar.xlsx")
+        history_df = pd.read_sql("SELECT * FROM oranlar", engine)
     except Exception:
         history_df = pd.DataFrame()
 
     try:
-        today_df = pd.read_excel("bugun_oranlar.xlsx")
+        today_df = pd.read_sql("SELECT * FROM bugun_oranlar", engine)
     except Exception:
         today_df = pd.DataFrame()
 

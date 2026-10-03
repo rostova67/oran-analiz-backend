@@ -6,7 +6,7 @@ from typing import Optional, Any
 from sqlalchemy import create_engine
 import time
 
-app = FastAPI(title="Oran Analiz API", version="5.0")
+app = FastAPI(title="Oran Analiz API", version="6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,9 +16,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============================================================
-# VERİTABANI BAĞLANTISI (SUPABASE)
-# ============================================================
 DB_URL = "postgresql://postgres:KatarinaRostova67@db.xqhdhwdgitksemfidsdi.supabase.co:5432/postgres"
 engine = create_engine(DB_URL)
 
@@ -28,7 +25,6 @@ MIN_SIMILAR_MATCHES = 7
 SIMILARITY_TOLERANCE = 0.05
 MIN_TEAM_MATCHES = 7
 
-# ÖNBELLEK MEKANİZMASI
 CACHE_DATA = {
     "history_df": pd.DataFrame(),
     "today_df": pd.DataFrame(),
@@ -47,14 +43,14 @@ def load_data(force_refresh: bool = False):
         history_df = pd.read_sql("SELECT * FROM oranlar", engine)
         history_df.columns = [str(c).upper().strip() for c in history_df.columns]
     except Exception as e:
-        print(f"History oku hatasi: {e}")
+        print(f"History okuma hatasi: {e}")
         history_df = pd.DataFrame()
 
     try:
         today_df = pd.read_sql("SELECT * FROM bugun_oranlar", engine)
         today_df.columns = [str(c).upper().strip() for c in today_df.columns]
     except Exception as e:
-        print(f"Today oku hatasi: {e}")
+        print(f"Today okuma hatasi: {e}")
         today_df = pd.DataFrame()
 
     for df in [history_df, today_df]:
@@ -255,7 +251,7 @@ def get_tum_maclar_list():
         return {"matches": []}
 
     matches = []
-    for _, row in history_df.iterrows():
+    for idx, row in history_df.iterrows():
         mac = str(row.get("MAC", "")).strip()
         if not mac or mac.lower() == "nan":
             continue
@@ -263,7 +259,7 @@ def get_tum_maclar_list():
         display_name = f"[{saat}] {mac}" if saat else mac
         matches.append(display_name)
 
-    return {"matches": matches}
+    return {"matches": matches, "data": matches}
 
 
 @app.get("/api/yeni-maclar-list")
@@ -274,16 +270,34 @@ def get_yeni_maclar_list():
     if today_df.empty or "MAC" not in today_df.columns:
         return {"matches": []}
 
-    matches = []
-    for _, row in today_df.iterrows():
+    matches_list = []
+    matches_obj_list = []
+
+    for idx, row in today_df.iterrows():
         mac = str(row.get("MAC", "")).strip()
         if not mac or mac.lower() == "nan":
             continue
         saat = format_saat(row.get("SAAT"))
         display_name = f"[{saat}] {mac}" if saat else mac
-        matches.append(display_name)
+        
+        matches_list.append(display_name)
+        matches_obj_list.append({
+            "id": int(idx),
+            "mac": mac,
+            "display": display_name,
+            "saat": saat,
+            "ms1": row.get("MS1"),
+            "msx": row.get("MSX"),
+            "ms2": row.get("MS2")
+        })
 
-    return {"matches": matches}
+    # Frontend ister liste ister obje beklesin, tum varyasyonlari gonderiyoruz
+    return {
+        "matches": matches_list,
+        "matches_obj": matches_obj_list,
+        "data": matches_list,
+        "count": len(matches_list)
+    }
 
 
 @app.get("/api/mac-detay")
@@ -355,75 +369,3 @@ def get_bugunun_enleri():
         "min_matches": MIN_SIMILAR_MATCHES,
         "tolerance": SIMILARITY_TOLERANCE
     }
-
-
-@app.get("/api/takimlar")
-def get_takimlar(filter: str = "win"):
-    history_df, _ = load_data()
-
-    if history_df.empty:
-        return {"teams": [], "min_team_matches": MIN_TEAM_MATCHES}
-
-    team_stats = {}
-
-    for _, row in history_df.iterrows():
-        parsed = parse_score(row.get("SKOR"))
-        if not parsed:
-            continue
-
-        h_score, a_score = parsed
-        total_goals = h_score + a_score
-
-        home_team = row.get("HOME_TEAM")
-        away_team = row.get("AWAY_TEAM")
-
-        if pd.notna(home_team) and str(home_team).strip() != "":
-            ht = str(home_team).strip()
-            if ht not in team_stats:
-                team_stats[ht] = {"name": ht, "total_matches": 0, "wins": 0, "total_goals": 0, "home_matches": 0, "home_goals": 0, "away_matches": 0, "away_goals": 0}
-            team_stats[ht]["total_matches"] += 1
-            team_stats[ht]["home_matches"] += 1
-            team_stats[ht]["total_goals"] += total_goals
-            team_stats[ht]["home_goals"] += total_goals
-            if h_score > a_score: team_stats[ht]["wins"] += 1
-
-        if pd.notna(away_team) and str(away_team).strip() != "":
-            at = str(away_team).strip()
-            if at not in team_stats:
-                team_stats[at] = {"name": at, "total_matches": 0, "wins": 0, "total_goals": 0, "home_matches": 0, "home_goals": 0, "away_matches": 0, "away_goals": 0}
-            team_stats[at]["total_matches"] += 1
-            team_stats[at]["away_matches"] += 1
-            team_stats[at]["total_goals"] += total_goals
-            team_stats[at]["away_goals"] += total_goals
-            if a_score > h_score: team_stats[at]["wins"] += 1
-
-    qualified_teams = []
-
-    for team_name, stats in team_stats.items():
-        if stats["total_matches"] < MIN_TEAM_MATCHES:
-            continue
-
-        win_rate = round((stats["wins"] / stats["total_matches"]) * 100, 1)
-        avg_goals = round(stats["total_goals"] / stats["total_matches"], 2)
-        home_avg_goals = round(stats["home_goals"] / max(1, stats["home_matches"]), 2)
-        away_avg_goals = round(stats["away_goals"] / max(1, stats["away_matches"]), 2)
-
-        qualified_teams.append({
-            "name": stats["name"],
-            "total_matches": stats["total_matches"],
-            "win_rate": win_rate,
-            "avg_goals": avg_goals,
-            "home_avg_goals": home_avg_goals,
-            "away_avg_goals": away_avg_goals
-        })
-
-    if filter == "gollu":
-        qualified_teams.sort(key=lambda x: x["avg_goals"], reverse=True)
-    elif filter == "home_gollu":
-        qualified_teams.sort(key=lambda x: x["home_avg_goals"], reverse=True)
-    elif filter == "away_gollu":
-        qualified_teams.sort(key=lambda x: x["away_avg_goals"], reverse=True)
-    else:
-        qualified_teams.sort(key=lambda x: x["win_rate"], reverse=True)
-
-    return {"teams": qualified_teams, "min_team_matches": MIN_TEAM_MATCHES}

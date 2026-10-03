@@ -6,7 +6,7 @@ from typing import Optional, Any
 from sqlalchemy import create_engine
 import time
 
-app = FastAPI(title="Oran Analiz API", version="4.6")
+app = FastAPI(title="Oran Analiz API", version="5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,27 +22,19 @@ app.add_middleware(
 DB_URL = "postgresql://postgres:KatarinaRostova67@db.xqhdhwdgitksemfidsdi.supabase.co:5432/postgres"
 engine = create_engine(DB_URL)
 
-ODDS_COLUMNS = [
-    "MS1",
-    "MSX",
-    "MS2",
-    "UST_2_5",
-    "ALT_2_5"
-]
+ODDS_COLUMNS = ["MS1", "MSX", "MS2", "UST_2_5", "ALT_2_5"]
 
 MIN_SIMILAR_MATCHES = 7
 SIMILARITY_TOLERANCE = 0.05
 MIN_TEAM_MATCHES = 7
 
-# ============================================================
-# ÖNBELLEK (CACHE) MEKANİZMASI
-# ============================================================
+# ÖNBELLEK MEKANİZMASI
 CACHE_DATA = {
     "history_df": pd.DataFrame(),
     "today_df": pd.DataFrame(),
     "last_updated": 0
 }
-CACHE_TTL = 300  # 5 dakika (Saniye cinsinden)
+CACHE_TTL = 300
 
 
 def load_data(force_refresh: bool = False):
@@ -53,12 +45,16 @@ def load_data(force_refresh: bool = False):
 
     try:
         history_df = pd.read_sql("SELECT * FROM oranlar", engine)
-    except Exception:
+        history_df.columns = [str(c).upper().strip() for c in history_df.columns]
+    except Exception as e:
+        print(f"History oku hatasi: {e}")
         history_df = pd.DataFrame()
 
     try:
         today_df = pd.read_sql("SELECT * FROM bugun_oranlar", engine)
-    except Exception:
+        today_df.columns = [str(c).upper().strip() for c in today_df.columns]
+    except Exception as e:
+        print(f"Today oku hatasi: {e}")
         today_df = pd.DataFrame()
 
     for df in [history_df, today_df]:
@@ -77,32 +73,23 @@ def load_data(force_refresh: bool = False):
 @app.get("/api/clear-cache")
 @app.get("/api/cache-clear")
 def clear_cache():
-    """Yeni veri yüklendiğinde önbelleği anında temizleyip yeniler."""
     load_data(force_refresh=True)
-    return {"status": "success", "message": "Önbellek başarıyla temizlendi ve güncellendi."}
+    return {"status": "success", "message": "Önbellek temizlendi ve güncellendi."}
 
 
 def parse_score(score_str: Any) -> Optional[tuple]:
     try:
         if pd.isna(score_str):
             return None
-
         parts = str(score_str).strip().split("-")
-
         if len(parts) != 2:
             return None
-
-        home = int(parts[0].strip())
-        away = int(parts[1].strip())
-
-        return home, away
-
+        return int(parts[0].strip()), int(parts[1].strip())
     except Exception:
         return None
 
 
 def format_saat(saat_val: Any) -> str:
-    """Saat değerini HH:MM formatına getirir."""
     if pd.isna(saat_val):
         return ""
     st = str(saat_val).strip()
@@ -111,21 +98,12 @@ def format_saat(saat_val: Any) -> str:
     return st
 
 
-def find_similar_matches(
-    history_df,
-    ms1,
-    msx,
-    ms2,
-    ust,
-    alt,
-    min_matches=MIN_SIMILAR_MATCHES
-):
+def find_similar_matches(history_df, ms1, msx, ms2, ust, alt, min_matches=MIN_SIMILAR_MATCHES):
     if history_df.empty:
         return pd.DataFrame(), SIMILARITY_TOLERANCE
 
     try:
         values = [ms1, msx, ms2, ust, alt]
-
         if any(pd.isna(v) for v in values):
             return pd.DataFrame(), SIMILARITY_TOLERANCE
 
@@ -142,36 +120,27 @@ def find_similar_matches(
         )
 
         filtered = history_df[condition].copy()
-
         if len(filtered) < min_matches:
             return pd.DataFrame(), SIMILARITY_TOLERANCE
 
         diff = (
-            (filtered["MS1"] - ms1).abs()
-            + (filtered["MSX"] - msx).abs()
-            + (filtered["MS2"] - ms2).abs()
-            + (filtered["UST_2_5"] - ust).abs()
-            + (filtered["ALT_2_5"] - alt).abs()
+            (filtered["MS1"] - ms1).abs() +
+            (filtered["MSX"] - msx).abs() +
+            (filtered["MS2"] - ms2).abs() +
+            (filtered["UST_2_5"] - ust).abs() +
+            (filtered["ALT_2_5"] - alt).abs()
         )
 
         filtered["SIM"] = (1 / (1 + diff)).round(3)
         filtered = filtered.sort_values(by="SIM", ascending=False)
-
         return filtered, SIMILARITY_TOLERANCE
-
     except Exception:
         return pd.DataFrame(), SIMILARITY_TOLERANCE
 
 
 def get_match_analysis_payload(row, history_df, min_matches=MIN_SIMILAR_MATCHES):
     similar_df, tolerance = find_similar_matches(
-        history_df,
-        row["MS1"],
-        row["MSX"],
-        row["MS2"],
-        row["UST_2_5"],
-        row["ALT_2_5"],
-        min_matches=min_matches
+        history_df, row.get("MS1"), row.get("MSX"), row.get("MS2"), row.get("UST_2_5"), row.get("ALT_2_5"), min_matches=min_matches
     )
 
     if len(similar_df) < min_matches:
@@ -198,11 +167,9 @@ def get_match_analysis_payload(row, history_df, min_matches=MIN_SIMILAR_MATCHES)
         if h >= 1: ev_05 += 1
         if a >= 1: dep_05 += 1
 
-        sim_saat_val = format_saat(s_row.get("SAAT"))
-
         similar_list.append({
             "MAC": s_row.get("MAC", "-"),
-            "SAAT": sim_saat_val,
+            "SAAT": format_saat(s_row.get("SAAT")),
             "SKOR": str(s_row.get("SKOR", "-")),
             "MS1": s_row.get("MS1", 0),
             "MSX": s_row.get("MSX", 0),
@@ -284,14 +251,13 @@ def get_stats():
 @app.get("/api/tum-maclar")
 def get_tum_maclar_list():
     history_df, _ = load_data()
-
     if history_df.empty or "MAC" not in history_df.columns:
         return {"matches": []}
 
     matches = []
-    for idx, row in history_df.iterrows():
+    for _, row in history_df.iterrows():
         mac = str(row.get("MAC", "")).strip()
-        if not mac:
+        if not mac or mac.lower() == "nan":
             continue
         saat = format_saat(row.get("SAAT"))
         display_name = f"[{saat}] {mac}" if saat else mac
@@ -303,20 +269,18 @@ def get_tum_maclar_list():
 @app.get("/api/yeni-maclar-list")
 @app.get("/api/bugun-oranlar")
 def get_yeni_maclar_list():
-    _, today_df = load_data()
+    _, today_df = load_data(force_refresh=True)
 
     if today_df.empty or "MAC" not in today_df.columns:
         return {"matches": []}
 
     matches = []
-    for idx, row in today_df.iterrows():
+    for _, row in today_df.iterrows():
         mac = str(row.get("MAC", "")).strip()
-        if not mac:
+        if not mac or mac.lower() == "nan":
             continue
         saat = format_saat(row.get("SAAT"))
         display_name = f"[{saat}] {mac}" if saat else mac
-        
-        # Frontend hem metin listesi hem obje listesi beklese de sorunsuz okur:
         matches.append(display_name)
 
     return {"matches": matches}
@@ -341,18 +305,9 @@ def get_mac_detay(mac: str, source: str = "today"):
     if row.empty:
         raise HTTPException(status_code=404, detail="Maç bulunamadı")
 
-    required_min_matches = 1
-
-    try:
-        payload = get_match_analysis_payload(row.iloc[0], history_df, min_matches=required_min_matches)
-    except Exception:
-        payload = None
-
+    payload = get_match_analysis_payload(row.iloc[0], history_df, min_matches=1)
     if not payload:
-        raise HTTPException(
-            status_code=400,
-            detail=f"En az {required_min_matches} benzer maç gerekli. Tolerans: ±{SIMILARITY_TOLERANCE:.2f}"
-        )
+        raise HTTPException(status_code=400, detail="Benzer maç bulunamadı.")
 
     return payload
 
@@ -382,7 +337,6 @@ def get_bugunun_enleri():
             if result:
                 result["ID"] = int(idx)
                 all_analyzed.append(result)
-
         except Exception:
             continue
 

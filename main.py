@@ -16,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_URL = "postgresql://postgres:KatarinaRostova67@db.xqhdhwdgitksemfidsdi.supabase.co:5432/postgres"
+DB_URL = "postgresql://postgres.xqhdhwdgitksemfidsdi:KatarinaRostova67@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 engine = create_engine(DB_URL)
 
 ODDS_COLUMNS = ["MS1", "MSX", "MS2", "UST_2_5", "ALT_2_5"]

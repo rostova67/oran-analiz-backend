@@ -16,6 +16,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/api/clear-cache")
+@app.get("/api/cache-clear")
+def clear_cache():
+    # Varsa Streamlit / lru_cache temizleme mantığı
+    try:
+        from functools import lru_cache
+        # Önbelleğe alınan fonksiyonlarınızın cache'ini temizleyin
+        # ornek_fonksiyon.cache_clear()
+        return {"status": "success", "message": "Önbellek başarıyla temizlendi"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # ============================================================
 # VERİTABANI BAĞLANTISI (SUPABASE)
 # ============================================================

@@ -122,7 +122,9 @@ ODDS_COLUMNS = [
     "ALT_2_5"
 ]
 
-MIN_TEAM_MATCHES = 3
+MIN_TEAM_MATCHES = 7
+MIN_SIMILAR_MATCHES = 7
+SIMILARITY_TOLERANCE = 0.05
 
 
 # =====================================================
@@ -682,115 +684,62 @@ def find_similar_matches(
     current_ms2,
     current_ust,
     current_alt,
-    min_matches=3
+    min_matches=MIN_SIMILAR_MATCHES
 ):
 
     if history_scored.empty:
-        return pd.DataFrame(), 0
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
-    target = np.array(
-        [
-            current_ms1,
-            current_msx,
-            current_ms2,
-            current_ust,
-            current_alt
-        ],
-        dtype=float
-    )
+    try:
+        target = np.array(
+            [
+                current_ms1,
+                current_msx,
+                current_ms2,
+                current_ust,
+                current_alt
+            ],
+            dtype=float
+        )
+    except Exception:
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
+
+    if np.isnan(target).any():
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
     candidates = []
 
-    # ---------------------------------------------
-    # Tolerans sırası
-    # ---------------------------------------------
+    for _, row in history_scored.iterrows():
+        try:
+            values = [
+                float(row["MS1"]),
+                float(row["MSX"]),
+                float(row["MS2"]),
+                float(row["UST_2_5"]),
+                float(row["ALT_2_5"])
+            ]
 
-    tolerances = [
-        0.10,
-        0.15,
-        0.20,
-        0.25,
-        0.30,
-        0.35
-    ]
-
-    for tolerance in tolerances:
-
-        candidates = []
-
-        for _, row in history_scored.iterrows():
-
-            try:
-
-                values = [
-                    float(row["MS1"]),
-                    float(row["MSX"]),
-                    float(row["MS2"]),
-                    float(row["UST_2_5"]),
-                    float(row["ALT_2_5"])
-                ]
-
-                if any(
-                    pd.isna(v)
-                    for v in values
-                ):
-                    continue
-
-                differences = np.abs(
-                    np.array(values)
-                    -
-                    target
-                )
-
-                if np.all(
-                    differences
-                    <=
-                    tolerance
-                ):
-
-                    similarity = float(
-                        differences.sum()
-                    )
-
-                    result = row.to_dict()
-
-                    result["SIM"] = round(
-                        similarity,
-                        4
-                    )
-
-                    candidates.append(
-                        result
-                    )
-
-            except Exception:
+            if any(pd.isna(v) for v in values):
                 continue
 
-        if len(candidates) >= min_matches:
-
-            return (
-                pd.DataFrame(
-                    candidates
-                ).sort_values(
-                    "SIM"
-                ),
-                tolerance
+            differences = np.abs(
+                np.array(values, dtype=float) - target
             )
 
-    if candidates:
+            if np.all(differences <= SIMILARITY_TOLERANCE):
+                result = row.to_dict()
+                result["SIM"] = round(float(differences.sum()), 4)
+                candidates.append(result)
 
-        return (
-            pd.DataFrame(
-                candidates
-            ).sort_values(
-                "SIM"
-            ),
-            tolerances[-1]
-        )
+        except Exception:
+            continue
+
+    if len(candidates) < min_matches:
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
     return (
-        pd.DataFrame(),
-        tolerances[-1]
+        pd.DataFrame(candidates).sort_values("SIM"),
+        SIMILARITY_TOLERANCE
     )
 
 
@@ -933,142 +882,83 @@ def get_team_similar_history(
     current_ms2,
     current_ust,
     current_alt,
-    min_matches=3
+    min_matches=MIN_SIMILAR_MATCHES
 ):
 
     if team not in team_matches:
-        return pd.DataFrame(), 0
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
-    team_history = team_matches[
-        team
-    ]
+    team_history = team_matches[team]
 
     if len(team_history) < MIN_TEAM_MATCHES:
-        return pd.DataFrame(), 0
-
-    # -------------------------------------------------
-    # Önce takımın geçmiş MAC'lerini bul
-    # -------------------------------------------------
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
     team_mac_set = set(
         str(item["MAC"]).strip()
         for item in team_history
     )
 
-    # -------------------------------------------------
-    # Global oran geçmişinden sadece bu takımın
-    # maçlarını seç
-    # -------------------------------------------------
-
     team_history_rows = history_scored[
         history_scored["MAC"]
         .astype(str)
         .str.strip()
-        .isin(
-            team_mac_set
-        )
+        .isin(team_mac_set)
     ].copy()
 
     if team_history_rows.empty:
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
-        return (
-            pd.DataFrame(),
-            0
+    try:
+        target = np.array(
+            [
+                current_ms1,
+                current_msx,
+                current_ms2,
+                current_ust,
+                current_alt
+            ],
+            dtype=float
         )
+    except Exception:
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
-    target = np.array(
-        [
-            current_ms1,
-            current_msx,
-            current_ms2,
-            current_ust,
-            current_alt
-        ],
-        dtype=float
-    )
+    if np.isnan(target).any():
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
-    tolerances = [
-        0.10,
-        0.15,
-        0.20,
-        0.25,
-        0.30,
-        0.35
-    ]
+    found = []
 
-    for tolerance in tolerances:
+    for _, row in team_history_rows.iterrows():
+        try:
+            values = np.array(
+                [
+                    float(row["MS1"]),
+                    float(row["MSX"]),
+                    float(row["MS2"]),
+                    float(row["UST_2_5"]),
+                    float(row["ALT_2_5"])
+                ],
+                dtype=float
+            )
 
-        found = []
-
-        for _, row in team_history_rows.iterrows():
-
-            try:
-
-                values = np.array(
-                    [
-                        float(row["MS1"]),
-                        float(row["MSX"]),
-                        float(row["MS2"]),
-                        float(row["UST_2_5"]),
-                        float(row["ALT_2_5"])
-                    ],
-                    dtype=float
-                )
-
-                if np.isnan(
-                    values
-                ).any():
-
-                    continue
-
-                diff = np.abs(
-                    values
-                    -
-                    target
-                )
-
-                if np.all(
-                    diff <= tolerance
-                ):
-
-                    result = row.to_dict()
-
-                    result["SIM"] = round(
-                        float(diff.sum()),
-                        4
-                    )
-
-                    found.append(
-                        result
-                    )
-
-            except Exception:
+            if np.isnan(values).any():
                 continue
 
-        if len(found) >= min_matches:
+            diff = np.abs(values - target)
 
-            return (
-                pd.DataFrame(
-                    found
-                ).sort_values(
-                    "SIM"
-                ),
-                tolerance
-            )
+            if np.all(diff <= SIMILARITY_TOLERANCE):
+                result = row.to_dict()
+                result["SIM"] = round(float(diff.sum()), 4)
+                found.append(result)
 
-        if found:
+        except Exception:
+            continue
 
-            best_found = pd.DataFrame(
-                found
-            )
-
-        else:
-
-            best_found = pd.DataFrame()
+    if len(found) < min_matches:
+        return pd.DataFrame(), SIMILARITY_TOLERANCE
 
     return (
-        best_found,
-        tolerances[-1]
+        pd.DataFrame(found).sort_values("SIM"),
+        SIMILARITY_TOLERANCE
     )
 
 
@@ -1126,7 +1016,7 @@ def calculate_today_goal_markets():
                 row["MS2"],
                 row["UST_2_5"],
                 row["ALT_2_5"],
-                min_matches=3
+                min_matches=MIN_SIMILAR_MATCHES
             )
 
             market = calculate_goal_market_from_similar(
@@ -1230,6 +1120,14 @@ st.sidebar.markdown(
     f"👥 **Analiz Edilebilir Takım:** `{len(valid_teams)}`"
 )
 
+st.sidebar.markdown(
+    f"🎯 **Min. Benzer Maç:** `{MIN_SIMILAR_MATCHES}`"
+)
+
+st.sidebar.markdown(
+    f"📏 **Oran Toleransı:** `±{SIMILARITY_TOLERANCE:.2f}`"
+)
+
 # =====================================================
 # SAYFA 1
 # TÜM MAÇLAR
@@ -1285,7 +1183,7 @@ if page == "Tüm Maçlar Seç":
         row["MS2"],
         row["UST_2_5"],
         row["ALT_2_5"],
-        min_matches=4
+        min_matches=MIN_SIMILAR_MATCHES
     )
 
     market = calculate_goal_market_from_similar(
@@ -1534,7 +1432,7 @@ elif page == "Yeni Maçlar Seç":
         row["MS2"],
         row["UST_2_5"],
         row["ALT_2_5"],
-        min_matches=4
+        min_matches=MIN_SIMILAR_MATCHES
     )
 
     market = calculate_goal_market_from_similar(
@@ -1694,7 +1592,7 @@ elif page == "🔥 BUGÜNÜN ENLERİ":
     )
 
     st.caption(
-        "Minimum 5 benzer geçmiş maç kriteri uygulanır."
+        "Minimum 7 benzer geçmiş maç kriteri uygulanır. Tolerans: ±0.05."
     )
 
     if today_df.empty:
@@ -1740,10 +1638,10 @@ elif page == "🔥 BUGÜNÜN ENLERİ":
                 row["MS2"],
                 row["UST_2_5"],
                 row["ALT_2_5"],
-                min_matches=5
+                min_matches=MIN_SIMILAR_MATCHES
             )
 
-            if len(similar_df) < 5:
+            if len(similar_df) < MIN_SIMILAR_MATCHES:
 
                 progress.progress(
                     (index + 1)
@@ -1886,7 +1784,7 @@ elif page == "🔥 BUGÜNÜN ENLERİ":
     if not top_results:
 
         st.warning(
-            "En az 5 benzer geçmiş maçı olan bugünkü maç bulunamadı."
+            "En az 7 benzer geçmiş maçı olan bugünkü maç bulunamadı."
         )
 
         st.stop()
@@ -2062,13 +1960,13 @@ elif page == "👥 TAKIM DETAY":
     )
 
     st.caption(
-        "Bir takımın en az 3 geçmiş maçı bulunmadan takım analizi yapılmaz."
+        "Bir takımın en az 7 geçmiş maçı bulunmadan takım analizi yapılmaz."
     )
 
     if not valid_teams:
 
         st.warning(
-            "En az 3 geçmiş maçı bulunan takım yok."
+            "En az 7 geçmiş maçı bulunan takım yok."
         )
 
         st.stop()
@@ -2214,7 +2112,7 @@ elif page == "👥 TAKIM DETAY":
                 row["MS2"],
                 row["UST_2_5"],
                 row["ALT_2_5"],
-                min_matches=3
+                min_matches=MIN_SIMILAR_MATCHES
             )
 
             market = calculate_goal_market_from_similar(
@@ -2407,7 +2305,7 @@ elif page == "👥 TAKIM DETAY":
                 today_row["MS2"],
                 today_row["UST_2_5"],
                 today_row["ALT_2_5"],
-                min_matches=3
+                min_matches=MIN_SIMILAR_MATCHES
             )
 
             if similar_team_df.empty:
@@ -2504,13 +2402,13 @@ elif page == "👥 TAKIM DETAY":
                 row["MS2"],
                 row["UST_2_5"],
                 row["ALT_2_5"],
-                min_matches=3
+                min_matches=MIN_SIMILAR_MATCHES
             )
 
             if (
                 similar_df.empty
                 or
-                len(similar_df) < 3
+                len(similar_df) < MIN_SIMILAR_MATCHES
             ):
                 continue
 
@@ -2574,7 +2472,7 @@ elif page == "👥 TAKIM DETAY":
         if ranking_df.empty:
 
             st.warning(
-                "En az 3 benzer geçmiş maçı sağlayan bugünkü karşılaşma bulunamadı."
+                "En az 7 benzer geçmiş maçı sağlayan bugünkü karşılaşma bulunamadı."
             )
 
         else:

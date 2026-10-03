@@ -1,7 +1,3 @@
-# =========================================================
-# BUGÜNÜN MAÇLARINI VE ORANLARINI ÇEKME SİSTEMİ (oran.py)
-# =========================================================
-
 import os
 import re
 import time
@@ -12,8 +8,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 
 BUGUN_FILE = "bugun_oranlar.xlsx"
-
-# Chrome Debug Portu (Ana tarama için 9222 kullanılır)
 DEBUG_PORT = 9222 
 
 def invalid_team(text):
@@ -38,25 +32,36 @@ def invalid_team(text):
     return False
 
 
-def find_time(block_lines):
-    for line in block_lines:
-        line_str = str(line).strip()
-        line_lower = line_str.lower()
+def find_today_time(block_lines):
+    """
+    Sadece 'Bugün' veya canlı/yakında başlayan maçların saatini döndürür.
+    Yarın veya ileri tarihli (ör: 20/09) maçlarda None döner.
+    """
+    full_block = " ".join([str(line).strip() for line in block_lines]).lower()
+    
+    # Eğer Yarın veya DD/MM tarih formatı geçiyorsa bu maçı atla
+    if "yarın" in full_block or "yarin" in full_block:
+        return None
+    if re.search(r"\b\d{2}/\d{2}\b", full_block):
+        return None
 
-        if "yarın" in line_lower or "yarin" in line_lower or re.search(r"\d{2}/\d{2}", line_str):
-            return None
+    # Dakika içinde başlayacak maçlar (Bugündür)
+    if "dakika" in full_block:
+        dakika_match = re.search(r"(\d+)\s*dakika", full_block)
+        if dakika_match:
+            return f"{dakika_match.group(1)} dk içinde"
+        return "Yakında"
 
-        if "dakika" in line_lower and "içinde" in line_lower:
-            dakika_match = re.search(r"(\d+)\s*dakika", line_lower)
-            if dakika_match:
-                return f"{dakika_match.group(1)} dakika içinde"
-            return "Dakika içinde"
+    # HH:MM formatında saat kontrolü
+    saat_match = re.search(r"\b(\d{2}:\d{2})\b", full_block)
+    
+    # Sadece blokta açıkça "bugün" geçiyorsa veya tarih içermeyen net bir saat bulunursa al
+    if "bugün" in full_block or "bugun" in full_block:
+        return saat_match.group(1) if saat_match else "Bugün"
 
-        if "bugün" in line_lower or "bugun" in line_lower:
-            saat_match = re.search(r"\d{2}:\d{2}", line_str)
-            if saat_match:
-                return f"Bugün {saat_match.group(0)}"
-            return "Bugün"
+    # Eğer blokta tarih kelimesi hiç yoksa ama doğrudan saat varsa (Bugünün varsayılan görünümü)
+    if saat_match:
+        return saat_match.group(1)
 
     return None
 
@@ -86,7 +91,7 @@ def main():
             pass
 
     all_matches = []
-    print("🔄 Sol menü taranıyor, ülkeler seçilip 5 saniye beklenecek...")
+    print("🔄 Sol menü taranıyor...")
 
     country_index = 0
 
@@ -110,8 +115,7 @@ def main():
             time.sleep(0.3)
             driver.execute_script("arguments[0].click();", target_anchor)
             
-            print("⏳ Maçların tam yüklenmesi için 5 saniye bekleniyor...")
-            time.sleep(5)
+            time.sleep(4)
 
             try:
                 body_text = driver.find_element(By.TAG_NAME, "body").text
@@ -137,9 +141,11 @@ def main():
 
             for local_ev_sahibi_idx, chunk in match_chunks:
                 try:
-                    time_chunk = chunk[max(0, local_ev_sahibi_idx - 6): local_ev_sahibi_idx]
-                    saat = find_time(time_chunk)
+                    # Sol taraftaki tarih/saat bloğunu inceliyoruz
+                    time_chunk = chunk[max(0, local_ev_sahibi_idx - 12): local_ev_sahibi_idx]
+                    saat = find_today_time(time_chunk)
                     
+                    # Eğer bugün maçı değilse (Yarın, tarih vs.) doğrudan ATLA
                     if saat is None:
                         continue
 
@@ -188,9 +194,10 @@ def main():
                                     break
 
                     mac = f"{home_team} vs {away_team}"
-                    print(f"  ⚽ Eklenen Maç: {mac} | ⏰ {saat}")
+                    print(f"  ⚽ Eklenen Bugün Maçı: {mac} | ⏰ {saat}")
 
                     all_matches.append({
+                        "SAAT": saat,
                         "MAC": mac,
                         "MS1": ms1,
                         "MSX": msx,
@@ -217,7 +224,7 @@ def main():
         df.to_excel(BUGUN_FILE, index=False)
         
         print("\n" + "=" * 60)
-        print("🎯 BUGÜNÜN TÜM MAÇLARI EKSİKSİZ KAYDEDİLDİ")
+        print("🎯 SADECE BUGÜNÜN MAÇLARI EKSİKSİZ KAYDEDİLDİ")
         print(f"📂 Kayıt Yolu: {BUGUN_FILE}")
         print(f"📈 Çekilen Toplam Maç Sayısı: {len(df)}")
         print("=" * 60 + "\n")

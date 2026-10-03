@@ -253,7 +253,7 @@ def get_tum_maclar_list():
     matches = []
     for idx, row in history_df.iterrows():
         mac = str(row.get("MAC", "")).strip()
-        if not mac or mac.lower() == "nan":
+        if not mac or mac.lower() in ["nan", "none", "null"]:
             continue
         saat = format_saat(row.get("SAAT"))
         display_name = f"[{saat}] {mac}" if saat else mac
@@ -265,39 +265,51 @@ def get_tum_maclar_list():
 @app.get("/api/yeni-maclar-list")
 @app.get("/api/bugun-oranlar")
 def get_yeni_maclar_list():
-    _, today_df = load_data(force_refresh=True)
-
-    if today_df.empty or "MAC" not in today_df.columns:
-        return {"matches": []}
-
-    matches_list = []
-    matches_obj_list = []
-
-    for idx, row in today_df.iterrows():
-        mac = str(row.get("MAC", "")).strip()
-        if not mac or mac.lower() == "nan":
-            continue
-        saat = format_saat(row.get("SAAT"))
-        display_name = f"[{saat}] {mac}" if saat else mac
+    try:
+        df = pd.read_sql("SELECT * FROM bugun_oranlar", engine)
         
-        matches_list.append(display_name)
-        matches_obj_list.append({
-            "id": int(idx),
-            "mac": mac,
-            "display": display_name,
-            "saat": saat,
-            "ms1": row.get("MS1"),
-            "msx": row.get("MSX"),
-            "ms2": row.get("MS2")
-        })
+        if df.empty:
+            return {"matches": [], "status": "empty_table", "message": "bugun_oranlar tablosu boş"}
+            
+        df.columns = [str(c).upper().strip() for c in df.columns]
+        
+        matches_list = []
+        matches_obj_list = []
 
-    # Frontend ister liste ister obje beklesin, tum varyasyonlari gonderiyoruz
-    return {
-        "matches": matches_list,
-        "matches_obj": matches_obj_list,
-        "data": matches_list,
-        "count": len(matches_list)
-    }
+        for idx, row in df.iterrows():
+            mac_val = row.get("MAC")
+            if pd.isna(mac_val):
+                continue
+            
+            mac = str(mac_val).strip()
+            if not mac or mac.lower() in ["nan", "none", "null"]:
+                continue
+
+            saat = str(row.get("SAAT", "")).strip()
+            if len(saat) >= 5 and ":" in saat:
+                saat = saat[:5]
+
+            display_name = f"[{saat}] {mac}" if saat else mac
+            
+            matches_list.append(display_name)
+            matches_obj_list.append({
+                "id": int(idx),
+                "mac": mac,
+                "display": display_name,
+                "saat": saat,
+                "ms1": row.get("MS1"),
+                "msx": row.get("MSX"),
+                "ms2": row.get("MS2")
+            })
+
+        return {
+            "matches": matches_list,
+            "matches_obj": matches_obj_list,
+            "data": matches_list,
+            "count": len(matches_list)
+        }
+    except Exception as e:
+        return {"matches": [], "error": str(e), "status": "exception"}
 
 
 @app.get("/api/mac-detay")

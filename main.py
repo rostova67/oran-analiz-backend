@@ -16,18 +16,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/api/clear-cache")
-@app.get("/api/cache-clear")
-def clear_cache():
-    # Varsa Streamlit / lru_cache temizleme mantığı
-    try:
-        from functools import lru_cache
-        # Önbelleğe alınan fonksiyonlarınızın cache'ini temizleyin
-        # ornek_fonksiyon.cache_clear()
-        return {"status": "success", "message": "Önbellek başarıyla temizlendi"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
 # ============================================================
 # VERİTABANI BAĞLANTISI (SUPABASE)
 # ============================================================
@@ -88,11 +76,12 @@ def load_data(force_refresh: bool = False):
     return history_df, today_df
 
 
+@app.get("/api/clear-cache")
 @app.get("/api/cache-clear")
 def clear_cache():
     """Yeni veri yüklendiğinde önbelleği anında temizleyip yeniler."""
     load_data(force_refresh=True)
-    return {"status": "ok", "message": "Önbellek başarıyla güncellendi."}
+    return {"status": "success", "message": "Önbellek başarıyla temizlendi ve güncellendi."}
 
 
 def parse_score(score_str: Any) -> Optional[tuple]:
@@ -365,6 +354,7 @@ def get_stats():
 
 
 @app.get("/api/tum-maclar-list")
+@app.get("/api/tum-maclar")
 def get_tum_maclar_list():
 
     history_df, _ = load_data()
@@ -385,6 +375,7 @@ def get_tum_maclar_list():
 
 
 @app.get("/api/yeni-maclar-list")
+@app.get("/api/bugun-oranlar")
 def get_yeni_maclar_list():
 
     _, today_df = load_data()
@@ -504,16 +495,13 @@ def get_bugunun_enleri():
             )
 
             if result:
-
                 result["ID"] = int(idx)
-
                 all_analyzed.append(result)
 
         except Exception:
             continue
 
     def get_top15(key):
-
         return sorted(
             all_analyzed,
             key=lambda x: x.get(key, 0),
